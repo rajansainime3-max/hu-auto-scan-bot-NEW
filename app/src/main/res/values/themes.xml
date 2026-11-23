@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.HUAutoScanBot" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.HUAutoScanBot" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="colorPrimary">@color/brand_red</item>
         <item name="colorPrimaryVariant">@color/brand_red_dark</item>
         <item name="colorOnPrimary">#FFFFFF</item>

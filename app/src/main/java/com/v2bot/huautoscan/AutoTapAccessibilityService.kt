@@ -54,7 +54,7 @@ class AutoTapAccessibilityService : AccessibilityService() {
         val path = Path().apply {
             moveTo(safeX, safeY)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0L, 60L)
+        val stroke = GestureDescription.StrokeDescription(path, 0L, 100L)
         val gesture = GestureDescription.Builder()
             .addStroke(stroke)
             .build()

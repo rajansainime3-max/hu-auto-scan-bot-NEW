@@ -139,6 +139,8 @@
 
                 <EditText
                     android:id="@+id/etServerUrl"
+                    android:textColor="#1C1E21"
+                    android:textColorHint="#757575"
                     android:layout_width="match_parent"
                     android:layout_height="46dp"
                     android:layout_marginTop="6dp"
@@ -204,6 +206,8 @@
 
                 <EditText
                     android:id="@+id/etArticleQueue"
+                    android:textColor="#1C1E21"
+                    android:textColorHint="#757575"
                     android:layout_width="match_parent"
                     android:layout_height="48dp"
                     android:layout_marginTop="8dp"

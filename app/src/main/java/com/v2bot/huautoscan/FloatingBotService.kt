@@ -68,6 +68,10 @@ class FloatingBotService : Service() {
 
     private var state: BotState = BotState.IDLE
     private var targetsHidden: Boolean = false
+    private var lockedEanX: Float = 0f
+    private var lockedEanY: Float = 0f
+    private var lockedSaveX: Float = 0f
+    private var lockedSaveY: Float = 0f
 
     private var articleQueue: List<Int> = emptyList()
     private var articleLabels: List<String> = emptyList()
@@ -215,6 +219,7 @@ class FloatingBotService : Service() {
         tvStatus = controlView!!.findViewById(R.id.tvOverlayStatus)
         btnPlayPause = controlView!!.findViewById(R.id.btnPlayPause)
         btnToggleTargets = controlView!!.findViewById(R.id.btnToggleTargets)
+        controlView!!.findViewById<TextView>(R.id.btnTestTap).setOnClickListener { performTestTap() }
         tvDelayQuick = controlView!!.findViewById(R.id.tvDelayQuick)
 
         val dragHandle = controlView!!.findViewById<View>(R.id.dragHandle)
@@ -276,16 +281,46 @@ class FloatingBotService : Service() {
         applyTargetVisibilityAndLock()
     }
 
+    private fun captureTargetCoordinates() {
+        val (ex, ey) = getCenterOnScreen(eanTargetView, eanTargetParams)
+        lockedEanX = ex
+        lockedEanY = ey
+        val (sx, sy) = getCenterOnScreen(saveTargetView, saveTargetParams)
+        lockedSaveX = sx
+        lockedSaveY = sy
+    }
+
     private fun applyTargetVisibilityAndLock() {
         val isRunning = state == BotState.RUNNING
         val showSave = BotConfig.isAutoSave(this)
 
-        eanTargetView?.visibility = if (targetsHidden) View.INVISIBLE else View.VISIBLE
-        saveTargetView?.visibility = if (targetsHidden || !showSave) View.GONE else View.VISIBLE
+        // Hide targets completely (View.GONE) while running so Realme/ColorOS/MIUI never blocks tap gestures
+        eanTargetView?.visibility = if (targetsHidden || isRunning) View.GONE else View.VISIBLE
+        saveTargetView?.visibility = if (targetsHidden || isRunning || !showSave) View.GONE else View.VISIBLE
         btnToggleTargets.text = if (targetsHidden) "Show Targets" else "Hide Targets"
 
         setTargetTouchPassThrough(eanTargetView, eanTargetParams, passThrough = isRunning)
         setTargetTouchPassThrough(saveTargetView, saveTargetParams, passThrough = isRunning)
+    }
+
+    private fun performTestTap() {
+        val service = AutoTapAccessibilityService.instance
+        if (service == null) {
+            Toast.makeText(this, "Accessibility Service OFF hai!", Toast.LENGTH_SHORT).show()
+            return
+        }
+        captureTargetCoordinates()
+        eanTargetView?.visibility = View.GONE
+        saveTargetView?.visibility = View.GONE
+        tvStatus.text = "Testing tap..."
+        handler.postDelayed({
+            service.performTap(lockedEanX, lockedEanY) { ok ->
+                handler.post {
+                    applyTargetVisibilityAndLock()
+                    tvStatus.text = if (ok) "Test Tap OK! Camera khula?" else "Tap Blocked! Accessibility restart karein"
+                }
+            }
+        }, 120L)
     }
 
     private fun setTargetTouchPassThrough(
@@ -319,6 +354,7 @@ class FloatingBotService : Service() {
             }
             BotState.PAUSED_MANUAL, BotState.PAUSED_BETWEEN_ARTICLES -> {
                 handler.removeCallbacksAndMessages(null)
+                captureTargetCoordinates()
                 state = BotState.RUNNING
                 btnPlayPause.text = "PAUSE"
                 applyTargetVisibilityAndLock()
@@ -342,6 +378,7 @@ class FloatingBotService : Service() {
         currentArticleDone = 0
         totalDone = 0
         totalPlanned = articleQueue.sum()
+        captureTargetCoordinates()
         state = BotState.RUNNING
         btnPlayPause.text = "PAUSE"
         applyTargetVisibilityAndLock()
@@ -385,8 +422,6 @@ class FloatingBotService : Service() {
 
         val targetQty = articleQueue[currentArticleIdx]
         val label = articleLabels.getOrNull(currentArticleIdx) ?: "Art ${currentArticleIdx + 1}"
-        val (tapX, tapY) = getCenterOnScreen(eanTargetView, eanTargetParams)
-
         currentArticleDone++
         totalDone++
         tvStatus.text = "$label • $currentArticleDone/$targetQty (Tot $totalDone/$totalPlanned)"
@@ -397,9 +432,13 @@ class FloatingBotService : Service() {
             mapOf("index" to currentArticleIdx, "done" to currentArticleDone, "status" to "SCANNING")
         )
 
-        service.performTap(tapX, tapY) {
+        service.performTap(lockedEanX, lockedEanY) { ok ->
             handler.post {
                 if (state != BotState.RUNNING) return@post
+                if (!ok) {
+                    stopBotRun("Tap Failed (Accessibility check karein)")
+                    return@post
+                }
                 if (currentArticleDone >= targetQty) {
                     onArticleCompleted()
                 } else {
@@ -424,8 +463,7 @@ class FloatingBotService : Service() {
             if (BotConfig.isAutoSave(this)) {
                 tvStatus.text = "Box Done! Tapping SAVE..."
                 handler.postDelayed({
-                    val (saveX, saveY) = getCenterOnScreen(saveTargetView, saveTargetParams)
-                    AutoTapAccessibilityService.instance?.performTap(saveX, saveY) {
+                    AutoTapAccessibilityService.instance?.performTap(lockedSaveX, lockedSaveY) {
                         handler.post {
                             stopBotRun("Saved ($totalDone/$totalPlanned)")
                         }
