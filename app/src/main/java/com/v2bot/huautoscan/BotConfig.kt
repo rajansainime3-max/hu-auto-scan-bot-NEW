@@ -7,6 +7,7 @@ object BotConfig {
     private const val PREF_NAME = "hu_auto_scan_bot_prefs"
     private const val KEY_QUEUE = "article_queue"
     private const val KEY_LABELS = "article_labels"
+    private const val KEY_BARCODES = "article_barcodes"
     private const val KEY_TAP_DELAY_MS = "tap_delay_ms"
     private const val KEY_AUTO_RESUME = "auto_resume_next"
     private const val KEY_ARTICLE_PAUSE_SEC = "article_pause_sec"
@@ -50,11 +51,24 @@ object BotConfig {
         return raw.split("||").map { it.trim() }
     }
 
+    fun getBarcodesRaw(context: Context): String =
+        prefs(context).getString(KEY_BARCODES, "") ?: ""
+
+    fun setBarcodesRaw(context: Context, raw: String) {
+        prefs(context).edit().putString(KEY_BARCODES, raw).apply()
+    }
+
+    fun getBarcodesList(context: Context): List<String> {
+        val raw = getBarcodesRaw(context)
+        if (raw.isBlank()) return emptyList()
+        return raw.split("||").map { it.trim() }
+    }
+
     fun getTapDelayMs(context: Context): Long =
-        prefs(context).getLong(KEY_TAP_DELAY_MS, 2500L).coerceIn(1000L, 6000L)
+        prefs(context).getLong(KEY_TAP_DELAY_MS, 2500L).coerceIn(500L, 6000L)
 
     fun setTapDelayMs(context: Context, ms: Long) {
-        prefs(context).edit().putLong(KEY_TAP_DELAY_MS, ms.coerceIn(1000L, 6000L)).apply()
+        prefs(context).edit().putLong(KEY_TAP_DELAY_MS, ms.coerceIn(500L, 6000L)).apply()
     }
 
     fun isAutoResumeNext(context: Context): Boolean =

@@ -75,6 +75,7 @@ class FloatingBotService : Service() {
 
     private var articleQueue: List<Int> = emptyList()
     private var articleLabels: List<String> = emptyList()
+    private var articleBarcodes: List<String> = emptyList()
     private var currentArticleIdx: Int = 0
     private var currentArticleDone: Int = 0
     private var totalDone: Int = 0
@@ -167,7 +168,7 @@ class FloatingBotService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -191,7 +192,7 @@ class FloatingBotService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -208,7 +209,7 @@ class FloatingBotService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -268,6 +269,7 @@ class FloatingBotService : Service() {
         if (state == BotState.IDLE) {
             articleQueue = BotConfig.getQueueList(this)
             articleLabels = BotConfig.getLabelsList(this)
+            articleBarcodes = BotConfig.getBarcodesList(this)
             totalPlanned = articleQueue.sum()
             val syncTag = if (BotConfig.isSyncEnabled(this)) " [PC Sync]" else ""
             tvStatus.text = if (articleQueue.isEmpty()) {
@@ -314,10 +316,11 @@ class FloatingBotService : Service() {
         saveTargetView?.visibility = View.GONE
         tvStatus.text = "Testing tap..."
         handler.postDelayed({
-            service.performTap(lockedEanX, lockedEanY) { ok ->
+            val firstBc = BotConfig.getBarcodesList(this).firstOrNull() ?: ""
+            service.inputEanBarcode(firstBc, lockedEanX, lockedEanY) { ok, info ->
                 handler.post {
                     applyTargetVisibilityAndLock()
-                    tvStatus.text = if (ok) "Test Tap OK! Camera khula?" else "Tap Blocked! Accessibility restart karein"
+                    tvStatus.text = if (ok) "$info OK" else "Action Failed! Accessibility check karein"
                 }
             }
         }, 120L)
@@ -329,7 +332,7 @@ class FloatingBotService : Service() {
         passThrough: Boolean
     ) {
         if (view == null || params == null) return
-        val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         params.flags = if (passThrough) {
             baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         } else {
@@ -370,6 +373,8 @@ class FloatingBotService : Service() {
         }
         articleQueue = BotConfig.getQueueList(this)
         articleLabels = BotConfig.getLabelsList(this)
+        articleBarcodes = BotConfig.getBarcodesList(this)
+            articleBarcodes = BotConfig.getBarcodesList(this)
         if (articleQueue.isEmpty()) {
             Toast.makeText(this, "SYNC ya QTY se article quantities daalein", Toast.LENGTH_SHORT).show()
             return
@@ -390,8 +395,9 @@ class FloatingBotService : Service() {
             mapOf("index" to 0, "done" to 0, "status" to "SCANNING")
         )
 
+        AutoTapAccessibilityService.instance?.ensureMixArticleState(articleQueue.size > 1)
         tvStatus.text = "Starting Art 1/${articleQueue.size}..."
-        scheduleNextTap(800L)
+        scheduleNextTap(700L)
     }
 
     private fun stopBotRun(reason: String) {
@@ -422,6 +428,7 @@ class FloatingBotService : Service() {
 
         val targetQty = articleQueue[currentArticleIdx]
         val label = articleLabels.getOrNull(currentArticleIdx) ?: "Art ${currentArticleIdx + 1}"
+        val barcode = articleBarcodes.getOrNull(currentArticleIdx) ?: ""
         currentArticleDone++
         totalDone++
         tvStatus.text = "$label • $currentArticleDone/$targetQty (Tot $totalDone/$totalPlanned)"
@@ -432,7 +439,7 @@ class FloatingBotService : Service() {
             mapOf("index" to currentArticleIdx, "done" to currentArticleDone, "status" to "SCANNING")
         )
 
-        service.performTap(lockedEanX, lockedEanY) { ok ->
+        service.inputEanBarcode(barcode, lockedEanX, lockedEanY) { ok, _ ->
             handler.post {
                 if (state != BotState.RUNNING) return@post
                 if (!ok) {

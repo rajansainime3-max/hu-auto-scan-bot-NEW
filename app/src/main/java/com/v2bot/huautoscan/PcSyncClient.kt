@@ -16,6 +16,7 @@ object PcSyncClient {
         val ok: Boolean,
         val quantities: List<Int> = emptyList(),
         val labels: List<String> = emptyList(),
+        val barcodes: List<String> = emptyList(),
         val message: String = ""
     )
 
@@ -42,6 +43,7 @@ object PcSyncClient {
                 val items = json.optJSONArray("items")
                 val qtys = mutableListOf<Int>()
                 val lbls = mutableListOf<String>()
+                val bcs = mutableListOf<String>()
                 if (items != null) {
                     for (i in 0 until items.length()) {
                         val obj = items.getJSONObject(i)
@@ -49,6 +51,7 @@ object PcSyncClient {
                         if (q > 0) {
                             qtys.add(q)
                             lbls.add(obj.optString("label", "Art ${i + 1}"))
+                            bcs.add(obj.optString("barcode", ""))
                         }
                     }
                 }
@@ -57,7 +60,8 @@ object PcSyncClient {
                 } else {
                     BotConfig.setQueueRaw(context, qtys.joinToString(", "))
                     BotConfig.setLabelsRaw(context, lbls.joinToString("||"))
-                    onComplete(PullResult(true, qtys, lbls, "Synced ${qtys.size} articles (${qtys.sum()} pcs)"))
+                    BotConfig.setBarcodesRaw(context, bcs.joinToString("||"))
+                    onComplete(PullResult(true, qtys, lbls, bcs, "Synced ${qtys.size} articles (${qtys.sum()} pcs)"))
                 }
             } catch (e: Exception) {
                 onComplete(PullResult(false, message = "Connect nahi hua: ${e.message ?: "Check Wi-Fi/IP"}"))

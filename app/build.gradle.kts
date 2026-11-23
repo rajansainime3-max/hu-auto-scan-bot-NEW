@@ -11,8 +11,8 @@ android {
         applicationId = "com.v2bot.huautoscan"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "3.0.0"
+        versionCode = 5
+        versionName = "5.0.0"
     }
 
     buildTypes {
