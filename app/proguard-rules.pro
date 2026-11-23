@@ -1,0 +1,2 @@
+-keep class com.v2bot.huautoscan.AutoTapAccessibilityService { *; }
+-keep class com.v2bot.huautoscan.FloatingBotService { *; }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HU Auto Scan Bot</string>
+    <string name="accessibility_service_label">HU Auto Scan Bot</string>
+    <string name="accessibility_service_description">Vendor HU Process app me EAN SCAN barcode icon aur SAVE button par automatic tap karne ke liye Accessibility permission zaroori hai. Volume Down button se bot turant ruk jata hai.</string>
+</resources>
