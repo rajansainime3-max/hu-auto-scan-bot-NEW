@@ -162,7 +162,6 @@ class AutoTapAccessibilityService : AccessibilityService() {
     }
 
     private fun setNodeTextReliably(node: AccessibilityNodeInfo, text: String): Boolean {
-        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
