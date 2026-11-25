@@ -5,9 +5,12 @@ import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlin.math.abs
 
 class AutoTapAccessibilityService : AccessibilityService() {
 
@@ -51,53 +54,46 @@ class AutoTapAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    /**
-     * Checks or unchecks MIX ARTICLE checkbox on Vendor HU Process screen.
-     * Multiple articles in box -> checked; single article -> unchecked.
-     */
-
-    fun fillBoxHuScan(boxNo: String): Boolean {
-        if (boxNo.isBlank()) return false
-        val root = rootInActiveWindow ?: return false
-        try {
-            val allNodes = mutableListOf<AccessibilityNodeInfo>()
-            collectNodes(root, allNodes)
-
-            var boxLabelRect: Rect? = null
-            var eanLabelTop = Int.MAX_VALUE
-            for (n in allNodes) {
-                val txt = (n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")
-                if (txt.contains("BOX/HU SCAN", ignoreCase = true)) {
-                    val r = Rect()
-                    n.getBoundsInScreen(r)
-                    if (!r.isEmpty) boxLabelRect = r
-                } else if (txt.contains("EAN SCAN", ignoreCase = true)) {
-                    val r = Rect()
-                    n.getBoundsInScreen(r)
-                    if (!r.isEmpty && r.top < eanLabelTop) eanLabelTop = r.top
+    private fun findLabelRect(allNodes: List<AccessibilityNodeInfo>, labelText: String): Rect? {
+        for (n in allNodes) {
+            val txt = ((n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")).trim()
+            if (txt.equals(labelText, ignoreCase = true) || txt.contains(labelText, ignoreCase = true)) {
+                // Prefer smaller leaf label nodes over giant parent containers
+                val r = Rect()
+                n.getBoundsInScreen(r)
+                if (!r.isEmpty && r.height() < 220) {
+                    return r
                 }
             }
-            if (boxLabelRect == null) return false
-
-            val bandTop = boxLabelRect.top - 40
-            val bandBottom = if (eanLabelTop in (bandTop + 20)..(bandTop + 400)) eanLabelTop else (boxLabelRect.bottom + 200)
-            for (n in allNodes) {
-                val cls = n.className?.toString() ?: ""
-                if (n.isEditable || cls.contains("EditText", ignoreCase = true)) {
-                    val r = Rect()
-                    n.getBoundsInScreen(r)
-                    if (!r.isEmpty && r.centerY() in bandTop..bandBottom) {
-                        n.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                        val args = Bundle().apply {
-                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, boxNo)
-                        }
-                        return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                    }
-                }
-            }
-        } catch (_: Exception) {
         }
-        return false
+        return null
+    }
+
+    /**
+     * Finds the EditText closest vertically (centerY) to the given label, on the right side.
+     * Never falls back to arbitrary EditTexts (like PO NUMBER or BILL NO).
+     */
+    private fun findEditTextForLabel(allNodes: List<AccessibilityNodeInfo>, labelText: String): AccessibilityNodeInfo? {
+        val labelRect = findLabelRect(allNodes, labelText) ?: return null
+        val targetY = labelRect.centerY()
+        var bestEdit: AccessibilityNodeInfo? = null
+        var bestDist = Int.MAX_VALUE
+
+        for (n in allNodes) {
+            val cls = n.className?.toString() ?: ""
+            if (n.isEditable || cls.contains("EditText", ignoreCase = true)) {
+                val r = Rect()
+                n.getBoundsInScreen(r)
+                if (r.isEmpty) continue
+                val dist = abs(r.centerY() - targetY)
+                // Side-by-side layout: EditText is at same Y (within 90px) or just below (within 130px)
+                if (dist <= 130 && dist < bestDist) {
+                    bestDist = dist
+                    bestEdit = n
+                }
+            }
+        }
+        return bestEdit
     }
 
     fun selectPoNumberIfNeeded(poNo: String, onDone: () -> Unit) {
@@ -113,54 +109,48 @@ class AutoTapAccessibilityService : AccessibilityService() {
         try {
             val allNodes = mutableListOf<AccessibilityNodeInfo>()
             collectNodes(root, allNodes)
-            // If PO No is already visible on screen (already selected), skip!
+
+            // Already selected on screen?
             for (n in allNodes) {
-                val txt = n.text?.toString() ?: ""
-                if (txt.contains(poNo, ignoreCase = true)) {
+                if ((n.text?.toString() ?: "").contains(poNo, ignoreCase = true)) {
                     onDone()
                     return
                 }
             }
-            // Otherwise find PO NUMBER row and click dropdown
-            var poRect: Rect? = null
-            var billTop = Int.MAX_VALUE
-            for (n in allNodes) {
-                val txt = (n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")
-                if (txt.contains("PO NUMBER", ignoreCase = true)) {
-                    val r = Rect()
-                    n.getBoundsInScreen(r)
-                    if (!r.isEmpty) poRect = r
-                } else if (txt.contains("BILL NO", ignoreCase = true)) {
-                    val r = Rect()
-                    n.getBoundsInScreen(r)
-                    if (!r.isEmpty && r.top < billTop) billTop = r.top
-                }
-            }
+
+            val poRect = findLabelRect(allNodes, "PO NUMBER")
             if (poRect != null) {
-                val bandTop = poRect.top - 30
-                val bandBottom = if (billTop in (bandTop + 20)..(bandTop + 350)) billTop else (poRect.bottom + 180)
                 val sw = resources.displayMetrics.widthPixels
+                var bestDropdown: AccessibilityNodeInfo? = null
+                var bestDist = Int.MAX_VALUE
                 for (n in allNodes) {
+                    if (!n.isClickable) continue
                     val r = Rect()
                     n.getBoundsInScreen(r)
-                    if (!r.isEmpty && r.centerY() in bandTop..bandBottom && r.centerX() > sw * 0.4f && n.isClickable) {
-                        n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            val popRoot = rootInActiveWindow
-                            if (popRoot != null) {
-                                val popNodes = mutableListOf<AccessibilityNodeInfo>()
-                                collectNodes(popRoot, popNodes)
-                                for (pn in popNodes) {
-                                    if ((pn.text?.toString() ?: "").contains(poNo, ignoreCase = true)) {
-                                        pn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                                        break
-                                    }
+                    if (r.isEmpty) continue
+                    val dist = abs(r.centerY() - poRect.centerY())
+                    if (dist <= 90 && r.centerX() > sw * 0.35f && r.height() < 200 && dist < bestDist) {
+                        bestDist = dist
+                        bestDropdown = n
+                    }
+                }
+                if (bestDropdown != null) {
+                    bestDropdown.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        val popRoot = rootInActiveWindow
+                        if (popRoot != null) {
+                            val popNodes = mutableListOf<AccessibilityNodeInfo>()
+                            collectNodes(popRoot, popNodes)
+                            for (pn in popNodes) {
+                                if ((pn.text?.toString() ?: "").contains(poNo, ignoreCase = true)) {
+                                    pn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                    break
                                 }
                             }
-                            onDone()
-                        }, 450L)
-                        return
-                    }
+                        }
+                        onDone()
+                    }, 500L)
+                    return
                 }
             }
         } catch (_: Exception) {
@@ -168,51 +158,55 @@ class AutoTapAccessibilityService : AccessibilityService() {
         onDone()
     }
 
+    fun fillBoxHuScan(boxNo: String): Boolean {
+        if (boxNo.isBlank()) return false
+        val root = rootInActiveWindow ?: return false
+        try {
+            val allNodes = mutableListOf<AccessibilityNodeInfo>()
+            collectNodes(root, allNodes)
+            val edit = findEditTextForLabel(allNodes, "BOX/HU SCAN") ?: return false
+            edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, boxNo)
+            }
+            return edit.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        } catch (_: Exception) {
+        }
+        return false
+    }
+
     fun ensureMixArticleState(shouldBeChecked: Boolean) {
         val root = rootInActiveWindow ?: return
         try {
             val allNodes = mutableListOf<AccessibilityNodeInfo>()
             collectNodes(root, allNodes)
-
-            var mixLabelRect: Rect? = null
-            for (n in allNodes) {
-                val txt = (n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")
-                if (txt.contains("MIX ARTICLE", ignoreCase = true)) {
-                    val r = Rect()
-                    n.getBoundsInScreen(r)
-                    if (!r.isEmpty) {
-                        mixLabelRect = r
-                        break
-                    }
-                }
-            }
-            if (mixLabelRect == null) return
-
-            val bandTop = mixLabelRect.top - 40
-            val bandBottom = mixLabelRect.bottom + 40
+            val mixRect = findLabelRect(allNodes, "MIX ARTICLE") ?: return
+            var bestCb: AccessibilityNodeInfo? = null
+            var bestDist = Int.MAX_VALUE
             for (n in allNodes) {
                 if (n.isCheckable) {
                     val r = Rect()
                     n.getBoundsInScreen(r)
-                    if (!r.isEmpty && r.centerY() in bandTop..bandBottom) {
-                        if (n.isChecked != shouldBeChecked) {
-                            n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        }
-                        return
+                    if (r.isEmpty) continue
+                    val dist = abs(r.centerY() - mixRect.centerY())
+                    if (dist <= 90 && dist < bestDist) {
+                        bestDist = dist
+                        bestCb = n
                     }
                 }
+            }
+            if (bestCb != null && bestCb.isChecked != shouldBeChecked) {
+                bestCb.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }
         } catch (_: Exception) {
         }
     }
 
-    /**
-     * Types the 8-digit barcode directly into EAN SCAN EditText (INPUT/Scan).
-     * If barcode is blank, falls back to tapping the barcode icon.
-     */
     fun inputEanBarcode(barcode: String, fallbackX: Float, fallbackY: Float, onResult: (Boolean, String) -> Unit) {
         if (barcode.isBlank()) {
-            trySmartTapEanIcon(fallbackX, fallbackY, onResult)
+            performTap(fallbackX, fallbackY) { ok ->
+                onResult(ok, "TargetTap (${fallbackX.toInt()},${fallbackY.toInt()})")
+            }
             return
         }
 
@@ -221,49 +215,15 @@ class AutoTapAccessibilityService : AccessibilityService() {
             try {
                 val allNodes = mutableListOf<AccessibilityNodeInfo>()
                 collectNodes(root, allNodes)
-
-                var eanLabelRect: Rect? = null
-                var scannedQtyTop = Int.MAX_VALUE
-                for (n in allNodes) {
-                    val txt = (n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")
-                    if (txt.contains("EAN SCAN", ignoreCase = true)) {
-                        val r = Rect()
-                        n.getBoundsInScreen(r)
-                        if (!r.isEmpty) eanLabelRect = r
-                    } else if (txt.contains("SCANNED QTY", ignoreCase = true)) {
-                        val r = Rect()
-                        n.getBoundsInScreen(r)
-                        if (!r.isEmpty && r.top < scannedQtyTop) scannedQtyTop = r.top
-                    }
-                }
-
-                // Find EditText inside EAN SCAN band (supports both stacked and side-by-side layout!)
-                val bandTop = if (eanLabelRect != null) eanLabelRect.top - 50 else 0
-                val bandBottom = if (eanLabelRect != null) {
-                    if (scannedQtyTop in (eanLabelRect.top + 10)..(eanLabelRect.top + 400)) scannedQtyTop else (eanLabelRect.bottom + 200)
-                } else Int.MAX_VALUE
-
-                var targetEdit: AccessibilityNodeInfo? = null
-                for (n in allNodes) {
-                    val cls = n.className?.toString() ?: ""
-                    if (n.isEditable || cls.contains("EditText", ignoreCase = true)) {
-                        val r = Rect()
-                        n.getBoundsInScreen(r)
-                        if (!r.isEmpty && r.centerY() in bandTop..bandBottom) {
-                            targetEdit = n
-                            break
-                        }
-                    }
-                }
-
-                if (targetEdit != null) {
-                    targetEdit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                val eanEdit = findEditTextForLabel(allNodes, "EAN SCAN")
+                if (eanEdit != null) {
+                    eanEdit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
                     val args = Bundle().apply {
                         putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, barcode)
                     }
-                    val ok = targetEdit.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                    val ok = eanEdit.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
                     if (ok) {
-                        onResult(true, "Typed $barcode")
+                        onResult(true, "EAN $barcode")
                         return
                     }
                 }
@@ -271,71 +231,7 @@ class AutoTapAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Fallback to icon tap if EditText wasn't accessible
-        trySmartTapEanIcon(fallbackX, fallbackY, onResult)
-    }
-
-    fun trySmartTapEanIcon(fallbackX: Float, fallbackY: Float, onResult: (Boolean, String) -> Unit) {
-        val root = rootInActiveWindow
-        if (root != null) {
-            try {
-                val allNodes = mutableListOf<AccessibilityNodeInfo>()
-                collectNodes(root, allNodes)
-
-                var eanLabelRect: Rect? = null
-                var scannedQtyTop = Int.MAX_VALUE
-                for (n in allNodes) {
-                    val txt = (n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")
-                    if (txt.contains("EAN SCAN", ignoreCase = true)) {
-                        val r = Rect()
-                        n.getBoundsInScreen(r)
-                        if (!r.isEmpty) eanLabelRect = r
-                    } else if (txt.contains("SCANNED QTY", ignoreCase = true)) {
-                        val r = Rect()
-                        n.getBoundsInScreen(r)
-                        if (!r.isEmpty && r.top < scannedQtyTop) scannedQtyTop = r.top
-                    }
-                }
-
-                if (eanLabelRect != null) {
-                    val bandTop = eanLabelRect.top - 40
-                    val bandBottom = if (scannedQtyTop in (bandTop + 20)..(bandTop + 400)) scannedQtyTop else (bandTop + 240)
-                    val screenWidth = resources.displayMetrics.widthPixels
-
-                    var bestNode: AccessibilityNodeInfo? = null
-                    var bestRight = -1
-                    for (n in allNodes) {
-                        val r = Rect()
-                        n.getBoundsInScreen(r)
-                        if (r.isEmpty) continue
-                        val cy = r.centerY()
-                        if (cy in bandTop..bandBottom && r.centerX() > (screenWidth * 0.65f)) {
-                            if (n.isClickable || (n.className?.toString()?.contains("Image", true) == true)) {
-                                if (r.right > bestRight && r.width() < screenWidth * 0.45f) {
-                                    bestRight = r.right
-                                    bestNode = n
-                                }
-                            }
-                        }
-                    }
-
-                    if (bestNode != null) {
-                        val targetRect = Rect()
-                        bestNode.getBoundsInScreen(targetRect)
-                        if (bestNode.isClickable && bestNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                            onResult(true, "NodeClick (${targetRect.centerX()},${targetRect.centerY()})")
-                            return
-                        }
-                        performTap(targetRect.centerX().toFloat(), targetRect.centerY().toFloat()) { ok ->
-                            onResult(ok, "AutoTap (${targetRect.centerX()},${targetRect.centerY()})")
-                        }
-                        return
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-
+        // Only if EAN SCAN EditText wasn't found, tap user's Red EAN Target (never touch PO/BILL!)
         performTap(fallbackX, fallbackY) { ok ->
             onResult(ok, "TargetTap (${fallbackX.toInt()},${fallbackY.toInt()})")
         }
