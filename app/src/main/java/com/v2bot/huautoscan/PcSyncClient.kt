@@ -65,7 +65,7 @@ object PcSyncClient {
                     val boxNo = json.optString("box_no", "")
                     BotConfig.setPoNo(context, poNo)
                     BotConfig.setBoxNo(context, boxNo)
-                    onComplete(PullResult(true, qtys, lbls, bcs, "Synced ${qtys.size} articles (${qtys.sum()} pcs)"))
+                    onComplete(PullResult(true, qtys, lbls, bcs, "Synced ${qtys.size} Art (${qtys.sum()} pcs) | Box: $boxNo"))
                 }
             } catch (e: Exception) {
                 onComplete(PullResult(false, message = "Connect nahi hua: ${e.message ?: "Check Wi-Fi/IP"}"))

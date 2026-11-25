@@ -1,6 +1,9 @@
 package com.v2bot.huautoscan
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
@@ -158,18 +161,62 @@ class AutoTapAccessibilityService : AccessibilityService() {
         onDone()
     }
 
+    private fun setNodeTextReliably(node: AccessibilityNodeInfo, text: String): Boolean {
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            return true
+        }
+        // Fallback: Clipboard + ACTION_PASTE
+        return try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("hu_bot", text))
+            node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun fillBoxHuScan(boxNo: String): Boolean {
         if (boxNo.isBlank()) return false
         val root = rootInActiveWindow ?: return false
         try {
             val allNodes = mutableListOf<AccessibilityNodeInfo>()
             collectNodes(root, allNodes)
-            val edit = findEditTextForLabel(allNodes, "BOX/HU SCAN") ?: return false
-            edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            val args = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, boxNo)
+
+            var edit = findEditTextForLabel(allNodes, "BOX/HU SCAN")
+                ?: findEditTextForLabel(allNodes, "BOX/HU")
+                ?: findEditTextForLabel(allNodes, "HU SCAN")
+
+            // Fallback: pick the EditText directly above EAN SCAN EditText
+            if (edit == null) {
+                val eanEdit = findEditTextForLabel(allNodes, "EAN SCAN")
+                if (eanEdit != null) {
+                    val eanRect = Rect()
+                    eanEdit.getBoundsInScreen(eanRect)
+                    val editsAbove = allNodes.filter { n ->
+                        val cls = n.className?.toString() ?: ""
+                        if (!(n.isEditable || cls.contains("EditText", ignoreCase = true))) return@filter false
+                        val r = Rect()
+                        n.getBoundsInScreen(r)
+                        !r.isEmpty && r.bottom <= eanRect.top + 10
+                    }.sortedBy { n ->
+                        val r = Rect()
+                        n.getBoundsInScreen(r)
+                        r.top
+                    }
+                    if (editsAbove.isNotEmpty()) {
+                        edit = editsAbove.last()
+                    }
+                }
             }
-            return edit.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+
+            if (edit != null) {
+                return setNodeTextReliably(edit, boxNo)
+            }
         } catch (_: Exception) {
         }
         return false

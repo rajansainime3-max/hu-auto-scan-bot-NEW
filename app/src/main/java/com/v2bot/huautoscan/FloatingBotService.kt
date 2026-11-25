@@ -402,14 +402,15 @@ class FloatingBotService : Service() {
         svc?.selectPoNumberIfNeeded(poNo) {
             handler.postDelayed({
                 if (state != BotState.RUNNING) return@postDelayed
-                svc.fillBoxHuScan(boxNo)
+                val boxOk = if (boxNo.isNotBlank()) svc.fillBoxHuScan(boxNo) else true
+                tvStatus.text = if (boxOk) "Box $boxNo OK" else "Box $boxNo not found"
                 handler.postDelayed({
                     if (state != BotState.RUNNING) return@postDelayed
                     svc.ensureMixArticleState(articleQueue.size > 1)
                     tvStatus.text = "Starting Art 1/${articleQueue.size}..."
                     scheduleNextTap(500L)
-                }, 300L)
-            }, 250L)
+                }, 400L)
+            }, 550L)
         }
     }
 
