@@ -8,6 +8,8 @@ object BotConfig {
     private const val KEY_QUEUE = "article_queue"
     private const val KEY_LABELS = "article_labels"
     private const val KEY_BARCODES = "article_barcodes"
+    private const val KEY_PO_NO = "po_no"
+    private const val KEY_BOX_NO = "box_hu_no"
     private const val KEY_TAP_DELAY_MS = "tap_delay_ms"
     private const val KEY_AUTO_RESUME = "auto_resume_next"
     private const val KEY_ARTICLE_PAUSE_SEC = "article_pause_sec"
@@ -63,6 +65,12 @@ object BotConfig {
         if (raw.isBlank()) return emptyList()
         return raw.split("||").map { it.trim() }
     }
+
+    fun getPoNo(context: Context): String = prefs(context).getString(KEY_PO_NO, "") ?: ""
+    fun setPoNo(context: Context, v: String) { prefs(context).edit().putString(KEY_PO_NO, v.trim()).apply() }
+
+    fun getBoxNo(context: Context): String = prefs(context).getString(KEY_BOX_NO, "") ?: ""
+    fun setBoxNo(context: Context, v: String) { prefs(context).edit().putString(KEY_BOX_NO, v.trim()).apply() }
 
     fun getTapDelayMs(context: Context): Long =
         prefs(context).getLong(KEY_TAP_DELAY_MS, 2500L).coerceIn(500L, 6000L)

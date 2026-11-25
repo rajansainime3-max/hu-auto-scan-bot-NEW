@@ -395,9 +395,22 @@ class FloatingBotService : Service() {
             mapOf("index" to 0, "done" to 0, "status" to "SCANNING")
         )
 
-        AutoTapAccessibilityService.instance?.ensureMixArticleState(articleQueue.size > 1)
-        tvStatus.text = "Starting Art 1/${articleQueue.size}..."
-        scheduleNextTap(700L)
+        val svc = AutoTapAccessibilityService.instance
+        val poNo = BotConfig.getPoNo(this)
+        val boxNo = BotConfig.getBoxNo(this)
+        tvStatus.text = "Setting PO/Box/Mix..."
+        svc?.selectPoNumberIfNeeded(poNo) {
+            handler.postDelayed({
+                if (state != BotState.RUNNING) return@postDelayed
+                svc.fillBoxHuScan(boxNo)
+                handler.postDelayed({
+                    if (state != BotState.RUNNING) return@postDelayed
+                    svc.ensureMixArticleState(articleQueue.size > 1)
+                    tvStatus.text = "Starting Art 1/${articleQueue.size}..."
+                    scheduleNextTap(500L)
+                }, 300L)
+            }, 250L)
+        }
     }
 
     private fun stopBotRun(reason: String) {

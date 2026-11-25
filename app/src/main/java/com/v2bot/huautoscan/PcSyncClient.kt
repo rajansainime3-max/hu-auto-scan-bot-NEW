@@ -61,6 +61,10 @@ object PcSyncClient {
                     BotConfig.setQueueRaw(context, qtys.joinToString(", "))
                     BotConfig.setLabelsRaw(context, lbls.joinToString("||"))
                     BotConfig.setBarcodesRaw(context, bcs.joinToString("||"))
+                    val poNo = json.optString("po_no", "")
+                    val boxNo = json.optString("box_no", "")
+                    BotConfig.setPoNo(context, poNo)
+                    BotConfig.setBoxNo(context, boxNo)
                     onComplete(PullResult(true, qtys, lbls, bcs, "Synced ${qtys.size} articles (${qtys.sum()} pcs)"))
                 }
             } catch (e: Exception) {

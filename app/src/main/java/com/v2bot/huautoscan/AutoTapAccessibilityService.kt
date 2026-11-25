@@ -55,6 +55,119 @@ class AutoTapAccessibilityService : AccessibilityService() {
      * Checks or unchecks MIX ARTICLE checkbox on Vendor HU Process screen.
      * Multiple articles in box -> checked; single article -> unchecked.
      */
+
+    fun fillBoxHuScan(boxNo: String): Boolean {
+        if (boxNo.isBlank()) return false
+        val root = rootInActiveWindow ?: return false
+        try {
+            val allNodes = mutableListOf<AccessibilityNodeInfo>()
+            collectNodes(root, allNodes)
+
+            var boxLabelRect: Rect? = null
+            var eanLabelTop = Int.MAX_VALUE
+            for (n in allNodes) {
+                val txt = (n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")
+                if (txt.contains("BOX/HU SCAN", ignoreCase = true)) {
+                    val r = Rect()
+                    n.getBoundsInScreen(r)
+                    if (!r.isEmpty) boxLabelRect = r
+                } else if (txt.contains("EAN SCAN", ignoreCase = true)) {
+                    val r = Rect()
+                    n.getBoundsInScreen(r)
+                    if (!r.isEmpty && r.top < eanLabelTop) eanLabelTop = r.top
+                }
+            }
+            if (boxLabelRect == null) return false
+
+            val bandTop = boxLabelRect.top - 40
+            val bandBottom = if (eanLabelTop in (bandTop + 20)..(bandTop + 400)) eanLabelTop else (boxLabelRect.bottom + 200)
+            for (n in allNodes) {
+                val cls = n.className?.toString() ?: ""
+                if (n.isEditable || cls.contains("EditText", ignoreCase = true)) {
+                    val r = Rect()
+                    n.getBoundsInScreen(r)
+                    if (!r.isEmpty && r.centerY() in bandTop..bandBottom) {
+                        n.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                        val args = Bundle().apply {
+                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, boxNo)
+                        }
+                        return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return false
+    }
+
+    fun selectPoNumberIfNeeded(poNo: String, onDone: () -> Unit) {
+        if (poNo.isBlank()) {
+            onDone()
+            return
+        }
+        val root = rootInActiveWindow
+        if (root == null) {
+            onDone()
+            return
+        }
+        try {
+            val allNodes = mutableListOf<AccessibilityNodeInfo>()
+            collectNodes(root, allNodes)
+            // If PO No is already visible on screen (already selected), skip!
+            for (n in allNodes) {
+                val txt = n.text?.toString() ?: ""
+                if (txt.contains(poNo, ignoreCase = true)) {
+                    onDone()
+                    return
+                }
+            }
+            // Otherwise find PO NUMBER row and click dropdown
+            var poRect: Rect? = null
+            var billTop = Int.MAX_VALUE
+            for (n in allNodes) {
+                val txt = (n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")
+                if (txt.contains("PO NUMBER", ignoreCase = true)) {
+                    val r = Rect()
+                    n.getBoundsInScreen(r)
+                    if (!r.isEmpty) poRect = r
+                } else if (txt.contains("BILL NO", ignoreCase = true)) {
+                    val r = Rect()
+                    n.getBoundsInScreen(r)
+                    if (!r.isEmpty && r.top < billTop) billTop = r.top
+                }
+            }
+            if (poRect != null) {
+                val bandTop = poRect.top - 30
+                val bandBottom = if (billTop in (bandTop + 20)..(bandTop + 350)) billTop else (poRect.bottom + 180)
+                val sw = resources.displayMetrics.widthPixels
+                for (n in allNodes) {
+                    val r = Rect()
+                    n.getBoundsInScreen(r)
+                    if (!r.isEmpty && r.centerY() in bandTop..bandBottom && r.centerX() > sw * 0.4f && n.isClickable) {
+                        n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            val popRoot = rootInActiveWindow
+                            if (popRoot != null) {
+                                val popNodes = mutableListOf<AccessibilityNodeInfo>()
+                                collectNodes(popRoot, popNodes)
+                                for (pn in popNodes) {
+                                    if ((pn.text?.toString() ?: "").contains(poNo, ignoreCase = true)) {
+                                        pn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                        break
+                                    }
+                                }
+                            }
+                            onDone()
+                        }, 450L)
+                        return
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        onDone()
+    }
+
     fun ensureMixArticleState(shouldBeChecked: Boolean) {
         val root = rootInActiveWindow ?: return
         try {
